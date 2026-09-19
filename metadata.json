@@ -1,0 +1,6 @@
+{
+  "name": "Remix: MMO Snake",
+  "description": "Collect orbs to dominate the grid in this real-time massive multiplayer online snake game.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
