@@ -13,6 +13,12 @@ import {
   GameState,
   Player,
   Orb,
+  PowerUp,
+  PowerUpType,
+  STATIC_OBSTACLES,
+  POWERUP_DURATION,
+  POWERUP_DESPAWN_TIME,
+  MAX_ACTIVE_POWERUPS,
   WORLD_SIZE,
   BASE_SPEED,
   BOOST_SPEED,
@@ -95,10 +101,15 @@ const COLORS = [
   '#bd93f9', // vibrant purple
 ];
 
+const totalOrbsStmt = db.prepare('SELECT COALESCE(SUM(orbs_collected), 0) as total FROM leaderboard');
+const dbTotalOrbs = (totalOrbsStmt.get() as { total: number })?.total || 0;
+
 const state: GameState = {
   players: {},
   orbs: {},
+  powerUps: {},
   leaderboard: [],
+  totalOrbsCollected: Math.max(120, dbTotalOrbs),
 };
 
 function spawnOrb(x?: number, y?: number, value = 1, color?: string, force = false) {
@@ -113,10 +124,47 @@ function spawnOrb(x?: number, y?: number, value = 1, color?: string, force = fal
   };
 }
 
+function spawnPowerUp(forcedType?: PowerUpType, forcedX?: number, forcedY?: number) {
+  if (Object.keys(state.powerUps).length >= MAX_ACTIVE_POWERUPS) return;
+  const id = uuidv4();
+  const type: PowerUpType = forcedType ?? (Math.random() < 0.5 ? 'invincibility' : 'ghost');
+
+  let x = forcedX ?? (Math.random() - 0.5) * (WORLD_SIZE - 30);
+  let y = forcedY ?? (Math.random() - 0.5) * (WORLD_SIZE - 30);
+
+  // Avoid spawning directly inside an obstacle
+  let safe = true;
+  for (const obs of STATIC_OBSTACLES) {
+    if (Math.abs(x - obs.x) < obs.width / 2 + 3.0 && Math.abs(y - obs.y) < obs.height / 2 + 3.0) {
+      safe = false;
+      break;
+    }
+  }
+  if (!safe && forcedX === undefined) {
+    x = x > 0 ? x - 15 : x + 15;
+    y = y > 0 ? y - 15 : y + 15;
+  }
+
+  const now = Date.now();
+  state.powerUps[id] = {
+    id,
+    type,
+    x,
+    y,
+    duration: POWERUP_DURATION,
+    spawnedAt: now,
+    expiresAt: now + POWERUP_DESPAWN_TIME,
+  };
+}
+
 // Initial orbs
 for (let i = 0; i < 150; i++) {
   spawnOrb();
 }
+
+// Initial powerups
+spawnPowerUp('invincibility', -25, 25);
+spawnPowerUp('ghost', 25, -25);
 
 let snakeCounter = 1;
 
@@ -199,6 +247,7 @@ io.on('connection', (socket) => {
     currentAngle: number;
     isBoosting: boolean;
     state: string;
+    activePowerUp?: { type: PowerUpType; timeLeft: number } | null;
     cause?: { killerId?: string; obstacleId?: string };
   }) => {
     const player = state.players[socket.id];
@@ -207,9 +256,14 @@ io.on('connection', (socket) => {
       player.score = data.score;
       player.currentAngle = data.currentAngle;
       player.isBoosting = data.isBoosting;
+      if (data.activePowerUp !== undefined) {
+        player.activePowerUp = data.activePowerUp;
+      }
       
       if (data.state === 'dead') {
         player.state = 'dead';
+        player.activePowerUp = null;
+
         // Persist final score upon death
         upsertScore.run({
           id: player.id,
@@ -227,18 +281,25 @@ io.on('connection', (socket) => {
           }
         });
 
+        let killerName: string | undefined = undefined;
+        let killerColor: string | undefined = undefined;
+        let obstacleName: string | undefined = undefined;
+
         // Emit death / kill notification
         if (data.cause?.killerId && state.players[data.cause.killerId]) {
           const killer = state.players[data.cause.killerId];
+          killerName = killer.name;
+          killerColor = killer.headColor || '#ff7eb3';
           io.emit('game_notification', {
             id: uuidv4(),
             type: 'kill',
             title: 'ELIMINATION',
             message: `${killer.name} eliminated ${player.name}!`,
-            color: killer.headColor || '#ff7eb3',
+            color: killerColor,
             timestamp: Date.now(),
           });
         } else if (data.cause?.obstacleId) {
+          obstacleName = 'Neon Barrier Wall';
           io.emit('game_notification', {
             id: uuidv4(),
             type: 'crash',
@@ -248,6 +309,16 @@ io.on('connection', (socket) => {
             timestamp: Date.now(),
           });
         }
+
+        // Send detailed game-over summary to the player
+        socket.emit('game_over_summary', {
+          orbsCollected: player.orbsCollected || 0,
+          finalScore: Math.floor(player.score),
+          killerName,
+          killerColor,
+          obstacleName,
+          timestamp: Date.now(),
+        });
       }
     }
   });
@@ -256,6 +327,7 @@ io.on('connection', (socket) => {
     const orb = state.orbs[orbId];
     if (orb) {
       delete state.orbs[orbId];
+      state.totalOrbsCollected = (state.totalOrbsCollected || 0) + (orb.value || 1);
       const player = state.players[socket.id];
       if (player && player.state === 'alive') {
         const prevOrbs = player.orbsCollected || 0;
@@ -292,6 +364,55 @@ io.on('connection', (socket) => {
         y: orb.y,
         color: orb.color,
         collectorId: socket.id,
+      });
+    }
+  });
+
+  socket.on('collect_power_up', (powerUpId: string) => {
+    const pu = state.powerUps[powerUpId];
+    if (pu) {
+      delete state.powerUps[powerUpId];
+      const player = state.players[socket.id];
+      if (player && player.state === 'alive') {
+        player.activePowerUp = {
+          type: pu.type,
+          timeLeft: pu.duration,
+        };
+
+        io.emit('power_up_collected', {
+          id: powerUpId,
+          type: pu.type,
+          x: pu.x,
+          y: pu.y,
+          collectorId: socket.id,
+          collectorName: player.name,
+        });
+
+        io.emit('game_notification', {
+          id: uuidv4(),
+          type: 'milestone',
+          title: pu.type === 'invincibility' ? 'INVINCIBILITY SHIELD' : 'GHOST MODE',
+          message:
+            pu.type === 'invincibility'
+              ? `${player.name} activated Golden Invincibility!`
+              : `${player.name} activated Ghost Mode (pass through walls)!`,
+          color: pu.type === 'invincibility' ? '#ffd700' : '#bd93f9',
+          timestamp: Date.now(),
+        });
+      }
+    }
+  });
+
+  socket.on('send_emote', (emoji: string) => {
+    const player = state.players[socket.id];
+    if (player && player.state === 'alive') {
+      const cleanEmoji = typeof emoji === 'string' ? emoji.slice(0, 8) : '🔥';
+      const timestamp = Date.now();
+      player.activeEmote = { emoji: cleanEmoji, timestamp };
+      io.emit('player_emote', {
+        playerId: socket.id,
+        emoji: cleanEmoji,
+        timestamp,
       });
     }
   });
@@ -336,6 +457,17 @@ setInterval(() => {
   // Spawn random orbs
   if (Math.random() < 0.2) {
     spawnOrb();
+  }
+
+  // Manage power-ups: cleanup expired and periodically spawn new ones
+  const nowLoop = Date.now();
+  for (const pid in state.powerUps) {
+    if (nowLoop > state.powerUps[pid].expiresAt) {
+      delete state.powerUps[pid];
+    }
+  }
+  if (Object.keys(state.powerUps).length < MAX_ACTIVE_POWERUPS && Math.random() < 0.03) {
+    spawnPowerUp();
   }
 
   // Update persistent top 5 leaderboard based on collected orb count

@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
-import { GameState, GameNotification } from '../shared/types';
+import { GameState, GameNotification, PowerUpType } from '../shared/types';
 import { emitOrbParticles } from '../components/ParticleSystem';
 import { soundManager } from '../utils/audio';
 
@@ -22,25 +22,52 @@ export interface BoostState {
   cooldownLeft: number;
 }
 
+export interface GameOverSummary {
+  orbsCollected: number;
+  finalScore: number;
+  killerName?: string;
+  killerColor?: string;
+  obstacleName?: string;
+  timestamp: number;
+}
+
 interface GameStore {
   socket: Socket | null;
   gameState: GameState | null;
   playerId: string | null;
   customization: SnakeCustomization;
   isMuted: boolean;
+  sfxVolume: number;
+  musicVolume: number;
+  cameraZoom: number;
   isColorPickerOpen: boolean;
+  isSettingsOpen: boolean;
+  isEmoteMenuOpen: boolean;
   notifications: GameNotification[];
   boostState: BoostState;
+  activePowerUp: { type: PowerUpType; timeLeft: number } | null;
+  recentPlayerEmotes: Record<string, { emoji: string; timestamp: number }>;
+  gameOverSummary: GameOverSummary | null;
+
   connect: () => void;
   joinGame: () => void;
   setCustomization: (custom: Partial<SnakeCustomization>) => void;
   setColorPickerOpen: (open: boolean) => void;
+  setSettingsOpen: (open: boolean) => void;
+  setEmoteMenuOpen: (open: boolean) => void;
   toggleMute: () => void;
+  setSfxVolume: (vol: number) => void;
+  setMusicVolume: (vol: number) => void;
+  setCameraZoom: (zoom: number) => void;
   addNotification: (notification: GameNotification) => void;
   removeNotification: (id: string) => void;
   setBoostState: (state: BoostState) => void;
+  setActivePowerUp: (pu: { type: PowerUpType; timeLeft: number } | null) => void;
+  clearGameOverSummary: () => void;
   sendPlayerState: (data: any) => void;
   sendCollectOrb: (orbId: string) => void;
+  sendCollectPowerUp: (powerUpId: string) => void;
+  sendEmote: (emoji: string) => void;
 }
 
 export const globalGameState: { current: GameState | null } = { current: null };
@@ -70,13 +97,29 @@ function getSavedCustomization(): SnakeCustomization {
   return defaultCustom;
 }
 
+function getSavedZoom(): number {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('neon_snake_zoom');
+    if (saved) {
+      const val = parseFloat(saved);
+      if (!isNaN(val)) return Math.max(0.7, Math.min(1.6, val));
+    }
+  }
+  return 1.0;
+}
+
 export const useGameStore = create<GameStore>((set, get) => ({
   socket: null,
   gameState: null,
   playerId: null,
   customization: getSavedCustomization(),
   isMuted: soundManager.getIsMuted(),
+  sfxVolume: soundManager.getSfxVolume(),
+  musicVolume: soundManager.getMusicVolume(),
+  cameraZoom: getSavedZoom(),
   isColorPickerOpen: false,
+  isSettingsOpen: false,
+  isEmoteMenuOpen: false,
   notifications: [],
   boostState: {
     isAvailable: true,
@@ -84,15 +127,39 @@ export const useGameStore = create<GameStore>((set, get) => ({
     timeLeft: 0,
     cooldownLeft: 0,
   },
+  activePowerUp: null,
+  recentPlayerEmotes: {},
+  gameOverSummary: null,
 
   setColorPickerOpen: (isColorPickerOpen) => set({ isColorPickerOpen }),
+  setSettingsOpen: (isSettingsOpen) => set({ isSettingsOpen }),
+  setEmoteMenuOpen: (isEmoteMenuOpen) => set({ isEmoteMenuOpen }),
 
   toggleMute: () => {
     const isMuted = soundManager.toggleMute();
     set({ isMuted });
   },
 
+  setSfxVolume: (sfxVolume) => {
+    soundManager.setSfxVolume(sfxVolume);
+    set({ sfxVolume });
+  },
+
+  setMusicVolume: (musicVolume) => {
+    soundManager.setMusicVolume(musicVolume);
+    set({ musicVolume });
+  },
+
+  setCameraZoom: (cameraZoom) => {
+    set({ cameraZoom });
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('neon_snake_zoom', String(cameraZoom));
+    }
+  },
+
   setBoostState: (boostState) => set({ boostState }),
+  setActivePowerUp: (activePowerUp) => set({ activePowerUp }),
+  clearGameOverSummary: () => set({ gameOverSummary: null }),
 
   addNotification: (notification) => {
     const current = get().notifications;
@@ -142,6 +209,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
     });
 
+    socket.on('power_up_collected', (data: { id: string; type: PowerUpType; x: number; y: number; collectorId: string; collectorName: string }) => {
+      emitOrbParticles(data.x, data.y, data.type === 'invincibility' ? '#ffd700' : '#bd93f9');
+      if (data.collectorId === get().playerId) {
+        soundManager.playPowerupCollect(data.type);
+        set({ activePowerUp: { type: data.type, timeLeft: 8.0 } });
+      }
+    });
+
+    socket.on('player_emote', (data: { playerId: string; emoji: string; timestamp: number }) => {
+      const nextEmotes = { ...get().recentPlayerEmotes, [data.playerId]: { emoji: data.emoji, timestamp: data.timestamp } };
+      set({ recentPlayerEmotes: nextEmotes });
+      soundManager.playEmote();
+    });
+
+    socket.on('game_over_summary', (data: GameOverSummary) => {
+      set({ gameOverSummary: data, activePowerUp: null });
+    });
+
     socket.on('game_notification', (data: GameNotification) => {
       get().addNotification(data);
       soundManager.playNotification(data.type);
@@ -163,6 +248,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { socket, customization } = get();
     if (socket) {
       socket.emit('join', customization);
+      set({ gameOverSummary: null, activePowerUp: null });
+      // Also ensure background synth music starts when joining game
+      soundManager.startMusic();
     }
   },
 
@@ -177,6 +265,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { socket } = get();
     if (socket) {
       socket.emit('collect_orb', orbId);
+    }
+  },
+
+  sendCollectPowerUp: (powerUpId) => {
+    const { socket } = get();
+    if (socket) {
+      socket.emit('collect_power_up', powerUpId);
+    }
+  },
+
+  sendEmote: (emoji) => {
+    const { socket } = get();
+    if (socket) {
+      socket.emit('send_emote', emoji);
     }
   },
 }));

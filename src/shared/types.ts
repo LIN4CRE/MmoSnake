@@ -3,10 +3,30 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 
+export type PowerUpType = 'invincibility' | 'ghost';
+
+export type PowerUp = {
+  id: string;
+  type: PowerUpType;
+  x: number;
+  y: number;
+  duration: number; // Active buff duration in seconds (e.g. 8s)
+  spawnedAt: number;
+  expiresAt: number; // Timestamp when pickup despawns if uncollected
+};
+
+export type PlayerEmote = {
+  playerId: string;
+  emoji: string;
+  timestamp: number;
+};
+
 export type GameState = {
   players: Record<string, Player>;
   orbs: Record<string, Orb>;
+  powerUps: Record<string, PowerUp>;
   leaderboard: LeaderboardEntry[];
+  totalOrbsCollected: number;
 };
 
 export type PlayerState = 'alive' | 'dead' | 'spectating';
@@ -24,6 +44,14 @@ export type Player = {
   state: PlayerState;
   currentAngle: number;
   inputs: { left: boolean; right: boolean; boost: boolean };
+  activePowerUp?: {
+    type: PowerUpType;
+    timeLeft: number;
+  } | null;
+  activeEmote?: {
+    emoji: string;
+    timestamp: number;
+  } | null;
 };
 
 export type Orb = {
@@ -69,6 +97,10 @@ export const BASE_SPEED = 15;
 export const BOOST_SPEED = 32;
 export const BOOST_DURATION = 3.0; // seconds of active boost
 export const BOOST_COOLDOWN = 6.0; // seconds of cooldown
+export const POWERUP_DURATION = 8.0; // seconds of active invincibility or ghost mode
+export const POWER_UP_DURATION = 8.0; // alias
+export const POWERUP_DESPAWN_TIME = 25000; // ms before uncollected pickup despawns
+export const MAX_ACTIVE_POWERUPS = 4;
 export const TICK_RATE = 60; // 60 updates per second
 export const ORB_SPAWN_RATE = 0.1; // Orbs per tick
 export const MAX_ORBS = 300;

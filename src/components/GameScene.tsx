@@ -13,14 +13,17 @@ import {
   BASE_SPEED,
   BOOST_DURATION,
   BOOST_COOLDOWN,
+  POWER_UP_DURATION,
   STATIC_OBSTACLES,
+  PowerUpType,
 } from '../shared/types';
 import * as THREE from 'three';
-import { Sphere } from '@react-three/drei';
+import { Sphere, Html } from '@react-three/drei';
 import { ParticleSystem, emitOrbParticles } from './ParticleSystem';
 import { soundManager } from '../utils/audio';
-import { AnimatedGrid } from './AnimatedGrid';
+import { AnimatedGrid, getWorldColors } from './AnimatedGrid';
 import { Obstacles } from './Obstacles';
+import { PowerUps } from './PowerUps';
 
 const localCollectedOrbs = new Set<string>();
 
@@ -43,6 +46,14 @@ function Snake({
   const headColorObj = useMemo(() => new THREE.Color(), []);
   const tailColorObj = useMemo(() => new THREE.Color(), []);
   const segmentColorObj = useMemo(() => new THREE.Color(), []);
+
+  const recentPlayerEmotes = useGameStore((state) => state.recentPlayerEmotes);
+  const activePowerUp = useGameStore((state) => state.activePowerUp);
+  const playerEmote = recentPlayerEmotes[playerId];
+
+  // Power-up status for visual aura
+  const isInvincible = isLocal && activePowerUp?.type === 'invincibility';
+  const isGhost = isLocal && activePowerUp?.type === 'ghost';
 
   useFrame((state, delta) => {
     if (!bodyRef.current || !headRef.current) return;
@@ -114,9 +125,11 @@ function Snake({
     <group>
       <Sphere ref={headRef} castShadow receiveShadow args={[0.8, 16, 16]}>
         <meshStandardMaterial
-          color={headColor}
+          color={isGhost ? '#c084fc' : isInvincible ? '#ffd700' : headColor}
           roughness={0.2}
           metalness={0.8}
+          transparent={isGhost}
+          opacity={isGhost ? 0.6 : 1.0}
           toneMapped={false}
           onBeforeCompile={(shader) => {
             shader.fragmentShader = shader.fragmentShader.replace(
@@ -129,13 +142,56 @@ function Snake({
             );
           }}
         />
+
+        {/* Invincibility Shield Bubble */}
+        {isInvincible && (
+          <mesh>
+            <sphereGeometry args={[1.25, 16, 16]} />
+            <meshStandardMaterial
+              color="#ffd700"
+              emissive="#ffd700"
+              emissiveIntensity={2.5}
+              wireframe
+              transparent
+              opacity={0.7}
+              toneMapped={false}
+            />
+          </mesh>
+        )}
+
+        {/* Ghost Mode Ethereal Ring */}
+        {isGhost && (
+          <mesh>
+            <torusGeometry args={[1.2, 0.08, 12, 24]} />
+            <meshStandardMaterial
+              color="#c084fc"
+              emissive="#a855f7"
+              emissiveIntensity={2.2}
+              transparent
+              opacity={0.85}
+              toneMapped={false}
+            />
+          </mesh>
+        )}
+
+        {/* Floating Player Emote */}
+        {playerEmote && Date.now() - playerEmote.timestamp < 3500 && (
+          <Html position={[0, 0, 1.9]} center distanceFactor={20} zIndexRange={[120, 0]}>
+            <div className="animate-bounce select-none pointer-events-none px-2.5 py-1 bg-black/85 backdrop-blur-md rounded-full border border-white/20 shadow-2xl text-2xl flex items-center justify-center">
+              {playerEmote.emoji}
+            </div>
+          </Html>
+        )}
       </Sphere>
+
       <instancedMesh ref={bodyRef} args={[null as any, null as any, 2000]} castShadow receiveShadow frustumCulled={false}>
         <sphereGeometry args={[0.6, 16, 16]} />
         <meshStandardMaterial
           color="#ffffff"
           roughness={0.2}
           metalness={0.8}
+          transparent={isGhost}
+          opacity={isGhost ? 0.5 : 1.0}
           toneMapped={false}
           onBeforeCompile={(shader) => {
             shader.fragmentShader = shader.fragmentShader.replace(
@@ -203,7 +259,14 @@ function Orbs() {
 }
 
 export function GameScene() {
-  const { gameState, playerId, sendPlayerState, sendCollectOrb } = useGameStore();
+  const {
+    gameState,
+    playerId,
+    sendPlayerState,
+    sendCollectOrb,
+    sendCollectPowerUp,
+    cameraZoom,
+  } = useGameStore();
   const { camera } = useThree();
   const inputs = useRef({ left: false, right: false, boost: false });
   const lightRef = useRef<THREE.DirectionalLight>(null);
@@ -236,6 +299,12 @@ export function GameScene() {
     cooldownLeft: 0,
     lastUiSync: 0,
   });
+
+  const powerUpRef = useRef<{
+    type: PowerUpType;
+    timeLeft: number;
+    lastUiSync: number;
+  } | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -309,6 +378,7 @@ export function GameScene() {
         boostRef.current.isActive = false;
         boostRef.current.timeLeft = 0;
         boostRef.current.cooldownLeft = 0;
+        powerUpRef.current = null;
       }
 
       if (!localPlayerRef.current.active) return;
@@ -349,6 +419,23 @@ export function GameScene() {
           timeLeft: Math.max(0, boostRef.current.timeLeft),
           cooldownLeft: Math.max(0, boostRef.current.cooldownLeft),
         });
+      }
+
+      // Power-up timer countdown
+      if (powerUpRef.current) {
+        powerUpRef.current.timeLeft -= delta;
+        if (powerUpRef.current.timeLeft <= 0) {
+          powerUpRef.current = null;
+          useGameStore.getState().setActivePowerUp(null);
+        } else {
+          if (nowTime - powerUpRef.current.lastUiSync > 90) {
+            powerUpRef.current.lastUiSync = nowTime;
+            useGameStore.getState().setActivePowerUp({
+              type: powerUpRef.current.type,
+              timeLeft: Math.max(0, powerUpRef.current.timeLeft),
+            });
+          }
+        }
       }
 
       const speed = localPlayerRef.current.isBoosting ? BOOST_SPEED : BASE_SPEED;
@@ -397,6 +484,34 @@ export function GameScene() {
         }
       }
 
+      // Check power-up collisions
+      if (gs.powerUps) {
+        for (const puId in gs.powerUps) {
+          const pu = gs.powerUps[puId];
+          const dx = head.x - pu.x;
+          const dy = head.y - pu.y;
+          if (dx * dx + dy * dy < 4.5) {
+            powerUpRef.current = {
+              type: pu.type,
+              timeLeft: POWER_UP_DURATION,
+              lastUiSync: performance.now(),
+            };
+            useGameStore.getState().setActivePowerUp({
+              type: pu.type,
+              timeLeft: POWER_UP_DURATION,
+            });
+            soundManager.playPowerupCollect(pu.type);
+            emitOrbParticles(
+              pu.x,
+              pu.y,
+              pu.type === 'invincibility' ? '#ffd700' : '#c084fc'
+            );
+            delete gs.powerUps[puId];
+            sendCollectPowerUp(puId);
+          }
+        }
+      }
+
       // Cleanup localCollectedOrbs occasionally
       if (Math.random() < 0.05) {
         for (const id of localCollectedOrbs) {
@@ -404,22 +519,26 @@ export function GameScene() {
         }
       }
 
-      // Check obstacle collisions
+      // Check obstacle collisions (Ghost Mode allows passing through walls!)
       let collided = false;
       let collisionCause: { killerId?: string; obstacleId?: string } | undefined = undefined;
 
-      for (const obs of STATIC_OBSTACLES) {
-        const halfW = obs.width / 2 + 0.6;
-        const halfH = obs.height / 2 + 0.6;
-        if (Math.abs(head.x - obs.x) < halfW && Math.abs(head.y - obs.y) < halfH) {
-          collided = true;
-          collisionCause = { obstacleId: obs.id };
-          break;
+      const isGhost = powerUpRef.current?.type === 'ghost';
+      if (!isGhost) {
+        for (const obs of STATIC_OBSTACLES) {
+          const halfW = obs.width / 2 + 0.6;
+          const halfH = obs.height / 2 + 0.6;
+          if (Math.abs(head.x - obs.x) < halfW && Math.abs(head.y - obs.y) < halfH) {
+            collided = true;
+            collisionCause = { obstacleId: obs.id };
+            break;
+          }
         }
       }
 
-      // Check player collisions
-      if (!collided) {
+      // Check player collisions (Invincibility protects from colliding with other snakes!)
+      const isInvincible = powerUpRef.current?.type === 'invincibility';
+      if (!collided && !isInvincible) {
         for (const otherId in gs.players) {
           if (otherId === playerId) continue;
           const other = gs.players[otherId];
@@ -455,6 +574,9 @@ export function GameScene() {
         localPlayerRef.current.active = false;
         boostRef.current.isActive = false;
         boostRef.current.timeLeft = 0;
+        powerUpRef.current = null;
+        useGameStore.getState().setActivePowerUp(null);
+
         sendPlayerState({
           segments: localPlayerRef.current.segments,
           score: localPlayerRef.current.score,
@@ -485,7 +607,9 @@ export function GameScene() {
         localPlayerRef.current.lastSendTime = now;
       }
 
-      const targetZ = Math.min(45, Math.max(20, 20 + localPlayerRef.current.score * 0.2));
+      // Camera distance affected by score and camera zoom setting
+      const baseTargetZ = Math.min(48, Math.max(20, 20 + localPlayerRef.current.score * 0.2));
+      const targetZ = baseTargetZ * (cameraZoom || 1.0);
       
       // Smooth camera follow predicted head
       camera.position.x += (head.x - camera.position.x) * 10 * delta;
@@ -505,15 +629,20 @@ export function GameScene() {
 
   if (!gameState) return null;
 
+  const totalOrbsCollected = gameState.totalOrbsCollected || 0;
+  const { curr } = getWorldColors(totalOrbsCollected);
+
   return (
     <>
-      <ambientLight intensity={0.4} />
+      {/* Dynamic World Ambient and Directional Lighting shifted by total collective orbs */}
+      <ambientLight intensity={0.45} color={curr.light} />
       
       <directionalLight
         ref={lightRef}
         target={lightTarget}
         castShadow
-        intensity={2}
+        intensity={2.2}
+        color={curr.light}
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-20}
         shadow-camera-right={20}
@@ -530,6 +659,9 @@ export function GameScene() {
 
       {/* Static Wall Obstacles */}
       <Obstacles />
+
+      {/* Spawning Power-Up Items (Invincibility & Ghost Mode) */}
+      <PowerUps />
 
       <Orbs />
 

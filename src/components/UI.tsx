@@ -19,9 +19,17 @@ import {
   Bell,
   Gauge,
   ShieldAlert,
+  Settings,
+  Shield,
+  Ghost,
+  Globe,
 } from 'lucide-react';
 import { ColorPickerOverlay } from './ColorPickerOverlay';
-import { BOOST_DURATION, BOOST_COOLDOWN } from '../shared/types';
+import { SettingsOverlay } from './SettingsOverlay';
+import { GameOverSummaryOverlay } from './GameOverSummaryOverlay';
+import { EmoteMenu } from './EmoteMenu';
+import { BOOST_DURATION, BOOST_COOLDOWN, POWER_UP_DURATION } from '../shared/types';
+import { getWorldColors } from './AnimatedGrid';
 
 export function UI() {
   const {
@@ -34,8 +42,11 @@ export function UI() {
     toggleMute,
     isColorPickerOpen,
     setColorPickerOpen,
+    isSettingsOpen,
+    setSettingsOpen,
     notifications,
     boostState,
+    activePowerUp,
   } = useGameStore();
 
   const player = playerId && gameState ? gameState.players[playerId] : null;
@@ -52,6 +63,9 @@ export function UI() {
 
   const top5 = gameState?.leaderboard?.slice(0, 5) || [];
   const isUserInTop5 = top5.some((e) => e.id === playerId);
+
+  const totalOrbsCollected = gameState?.totalOrbsCollected || 0;
+  const { currentName, phaseNumber } = getWorldColors(totalOrbsCollected);
 
   // Calculate boost gauge percentages
   const activePercent = boostState.isActive
@@ -79,8 +93,19 @@ export function UI() {
             </span>
           </div>
 
+          {/* Dynamic World Atmosphere Status Tag */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold bg-black/40 backdrop-blur-md border border-white/10 text-white/75">
+              <Globe size={11} className="text-cyan-400" />
+              <span>World Tier {phaseNumber}:</span>
+              <strong className="text-white">{currentName}</strong>
+              <span className="text-white/40">•</span>
+              <span className="text-yellow-300 font-bold">{totalOrbsCollected} Orbs</span>
+            </div>
+          </div>
+
           {isAlive && (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 mt-0.5">
               <div className="flex items-center gap-1.5 text-sm font-mono text-white/90 font-bold bg-black/40 backdrop-blur-md px-3 py-1 rounded-xl border border-white/10">
                 <Flame size={14} className="text-orange-400" />
                 <span>Length:</span>
@@ -96,7 +121,7 @@ export function UI() {
         </div>
 
         {/* Controls Hint */}
-        <div className="absolute left-1/2 -translate-x-1/2 top-0 flex gap-2 opacity-80 pointer-events-none hidden md:flex">
+        <div className="absolute left-1/2 -translate-x-1/2 top-0 flex gap-2 opacity-80 pointer-events-none hidden lg:flex">
           <div className="flex items-center gap-2 text-xs font-mono text-white bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-md border border-white/10">
             <span className="font-bold bg-white/20 px-1.5 py-0.5 rounded text-white">A</span>
             <span className="font-bold bg-white/20 px-1.5 py-0.5 rounded text-white">D</span>
@@ -105,6 +130,10 @@ export function UI() {
           <div className="flex items-center gap-2 text-xs font-mono text-white bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-md border border-white/10">
             <span className="font-bold bg-white/20 px-1.5 py-0.5 rounded text-white">SPACE</span>
             <span className="text-white/70 uppercase tracking-wider text-[10px]">Speed Boost</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-mono text-white bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-md border border-white/10">
+            <span className="font-bold bg-white/20 px-1.5 py-0.5 rounded text-white">E</span>
+            <span className="text-white/70 uppercase tracking-wider text-[10px]">Emotes</span>
           </div>
         </div>
 
@@ -139,6 +168,15 @@ export function UI() {
             {isMuted ? <VolumeX size={16} className="text-red-400" /> : <Volume2 size={16} className="text-emerald-400" />}
           </button>
 
+          {/* Settings Overlay Button */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="p-2.5 bg-black/50 hover:bg-black/70 backdrop-blur-md rounded-full text-white/80 hover:text-white border border-white/15 transition-transform hover:scale-105 active:scale-95 shadow-lg"
+            title="Audio & View Settings"
+          >
+            <Settings size={16} className="text-cyan-400" />
+          </button>
+
           {/* New Tab */}
           <button
             onClick={handleOpenNewTab}
@@ -151,7 +189,7 @@ export function UI() {
       </div>
 
       {/* In-Game Notification System Feed */}
-      <div className="absolute top-14 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-none z-30 max-w-md w-full px-4">
+      <div className="absolute top-16 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-none z-30 max-w-md w-full px-4">
         <AnimatePresence>
           {notifications.map((notif) => (
             <motion.div
@@ -192,7 +230,7 @@ export function UI() {
 
       {/* Persistent In-Game Leaderboard Overlay (Top 5 Orb Count) */}
       {gameState && top5.length > 0 && (
-        <div className="absolute top-20 right-4 w-72 bg-black/60 backdrop-blur-xl rounded-2xl p-4 border border-white/15 shadow-2xl pointer-events-auto transition-all">
+        <div className="absolute top-24 right-4 w-72 bg-black/65 backdrop-blur-xl rounded-2xl p-4 border border-white/15 shadow-2xl pointer-events-auto transition-all">
           <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/10">
             <div className="flex items-center gap-2">
               <Trophy size={16} className="text-yellow-400 fill-yellow-400/20" />
@@ -290,77 +328,134 @@ export function UI() {
         </div>
       )}
 
-      {/* Temporary Speed Boost Cooldown & Gauge HUD Widget (Active when alive) */}
-      {isAlive && (
-        <div className="pointer-events-auto self-center mb-4 z-20">
-          <div
-            className={`flex flex-col gap-1.5 px-4 py-2.5 rounded-2xl backdrop-blur-xl border transition-all duration-300 shadow-2xl min-w-[240px] ${
-              boostState.isActive
-                ? 'bg-cyan-950/80 border-cyan-400 shadow-[0_0_25px_rgba(0,245,212,0.4)] scale-105'
-                : boostState.cooldownLeft > 0
-                ? 'bg-zinc-950/80 border-white/10 opacity-90'
-                : 'bg-black/60 border-cyan-500/40 hover:border-cyan-400 shadow-[0_0_15px_rgba(0,245,212,0.2)]'
-            }`}
-          >
-            <div className="flex items-center justify-between text-xs font-mono font-bold">
-              <div className="flex items-center gap-1.5">
-                <Gauge
-                  size={15}
-                  className={
-                    boostState.isActive
-                      ? 'text-cyan-300 animate-spin'
+      {/* Bottom HUD: Active Power-Ups, Speed Boost Gauge & Emote Menu */}
+      <div className="pointer-events-auto flex flex-col items-center gap-3 mb-2 z-20">
+        {/* Active Power-Up Banner */}
+        <AnimatePresence>
+          {isAlive && activePowerUp && (
+            <motion.div
+              initial={{ opacity: 0, y: 15, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+              className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl backdrop-blur-xl border shadow-2xl min-w-[260px] ${
+                activePowerUp.type === 'invincibility'
+                  ? 'bg-amber-950/80 border-amber-400/80 shadow-[0_0_25px_rgba(255,215,0,0.4)]'
+                  : 'bg-purple-950/80 border-purple-400/80 shadow-[0_0_25px_rgba(192,132,252,0.4)]'
+              }`}
+            >
+              <div
+                className={`p-2 rounded-xl text-white ${
+                  activePowerUp.type === 'invincibility'
+                    ? 'bg-amber-500/20 text-yellow-300'
+                    : 'bg-purple-500/20 text-purple-300'
+                }`}
+              >
+                {activePowerUp.type === 'invincibility' ? <Shield size={18} /> : <Ghost size={18} />}
+              </div>
+
+              <div className="flex-1">
+                <div className="flex items-center justify-between text-xs font-mono font-black">
+                  <span
+                    className={
+                      activePowerUp.type === 'invincibility' ? 'text-yellow-300' : 'text-purple-300'
+                    }
+                  >
+                    {activePowerUp.type === 'invincibility' ? 'INVINCIBILITY SHIELD' : 'GHOST MODE (WALL PASS)'}
+                  </span>
+                  <span className="text-white font-mono">{activePowerUp.timeLeft.toFixed(1)}s</span>
+                </div>
+
+                <div className="w-full h-1.5 bg-black/60 rounded-full mt-1.5 overflow-hidden border border-white/10">
+                  <div
+                    className={`h-full transition-all duration-75 rounded-full ${
+                      activePowerUp.type === 'invincibility'
+                        ? 'bg-gradient-to-r from-yellow-400 to-amber-300 shadow-[0_0_8px_#ffd700]'
+                        : 'bg-gradient-to-r from-purple-400 to-fuchsia-300 shadow-[0_0_8px_#c084fc]'
+                    }`}
+                    style={{ width: `${Math.min(100, (activePowerUp.timeLeft / POWER_UP_DURATION) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Temporary Speed Boost Gauge & Emote Controller row */}
+        {isAlive && (
+          <div className="flex items-center gap-3">
+            {/* Emote Button & Menu */}
+            <EmoteMenu />
+
+            {/* Speed Boost Widget */}
+            <div
+              className={`flex flex-col gap-1.5 px-4 py-2.5 rounded-2xl backdrop-blur-xl border transition-all duration-300 shadow-2xl min-w-[240px] ${
+                boostState.isActive
+                  ? 'bg-cyan-950/80 border-cyan-400 shadow-[0_0_25px_rgba(0,245,212,0.4)] scale-105'
+                  : boostState.cooldownLeft > 0
+                  ? 'bg-zinc-950/80 border-white/10 opacity-90'
+                  : 'bg-black/60 border-cyan-500/40 hover:border-cyan-400 shadow-[0_0_15px_rgba(0,245,212,0.2)]'
+              }`}
+            >
+              <div className="flex items-center justify-between text-xs font-mono font-bold">
+                <div className="flex items-center gap-1.5">
+                  <Gauge
+                    size={15}
+                    className={
+                      boostState.isActive
+                        ? 'text-cyan-300 animate-spin'
+                        : boostState.cooldownLeft > 0
+                        ? 'text-white/40'
+                        : 'text-cyan-400'
+                    }
+                  />
+                  <span className="uppercase tracking-wider">
+                    {boostState.isActive
+                      ? 'BOOST ACTIVE'
                       : boostState.cooldownLeft > 0
-                      ? 'text-white/40'
-                      : 'text-cyan-400'
-                  }
-                />
-                <span className="uppercase tracking-wider">
-                  {boostState.isActive
-                    ? 'SPEED BOOST ACTIVE'
-                    : boostState.cooldownLeft > 0
-                    ? 'BOOST RECHARGING'
-                    : 'SPEED BOOST READY'}
+                      ? 'RECHARGING'
+                      : 'BOOST READY'}
+                  </span>
+                </div>
+
+                <span className="text-[11px]">
+                  {boostState.isActive ? (
+                    <strong className="text-cyan-300">{boostState.timeLeft.toFixed(1)}s</strong>
+                  ) : boostState.cooldownLeft > 0 ? (
+                    <span className="text-white/50">{boostState.cooldownLeft.toFixed(1)}s</span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded-md bg-cyan-400/20 text-cyan-300 text-[10px] border border-cyan-400/30">
+                      SPACE
+                    </span>
+                  )}
                 </span>
               </div>
 
-              <span className="text-[11px]">
+              {/* Gauge Progress Bar */}
+              <div className="w-full h-2 bg-black/60 rounded-full overflow-hidden border border-white/10 relative">
                 {boostState.isActive ? (
-                  <strong className="text-cyan-300">{boostState.timeLeft.toFixed(1)}s</strong>
-                ) : boostState.cooldownLeft > 0 ? (
-                  <span className="text-white/50">{boostState.cooldownLeft.toFixed(1)}s</span>
+                  <div
+                    className="h-full bg-gradient-to-r from-cyan-400 via-teal-300 to-white transition-all duration-75 rounded-full shadow-[0_0_8px_#00f5d4]"
+                    style={{ width: `${activePercent}%` }}
+                  />
                 ) : (
-                  <span className="px-1.5 py-0.5 rounded-md bg-cyan-400/20 text-cyan-300 text-[10px] border border-cyan-400/30">
-                    SPACE
-                  </span>
+                  <div
+                    className={`h-full transition-all duration-100 rounded-full ${
+                      boostState.cooldownLeft > 0
+                        ? 'bg-white/30'
+                        : 'bg-cyan-400 shadow-[0_0_6px_#00f5d4]'
+                    }`}
+                    style={{ width: `${cooldownPercent}%` }}
+                  />
                 )}
-              </span>
-            </div>
-
-            {/* Gauge Progress Bar */}
-            <div className="w-full h-2 bg-black/60 rounded-full overflow-hidden border border-white/10 relative">
-              {boostState.isActive ? (
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-400 via-teal-300 to-white transition-all duration-75 rounded-full shadow-[0_0_8px_#00f5d4]"
-                  style={{ width: `${activePercent}%` }}
-                />
-              ) : (
-                <div
-                  className={`h-full transition-all duration-100 rounded-full ${
-                    boostState.cooldownLeft > 0
-                      ? 'bg-white/30'
-                      : 'bg-cyan-400 shadow-[0_0_6px_#00f5d4]'
-                  }`}
-                  style={{ width: `${cooldownPercent}%` }}
-                />
-              )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Menus (Join / Respawn) */}
+      {/* Menus (Join / Respawn fallback if no summary overlay) */}
       <AnimatePresence>
-        {(!player || isDead) && (
+        {!player && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -378,38 +473,20 @@ export function UI() {
                 style={{ backgroundColor: customization.tailColor }}
               />
 
-              {isDead ? (
-                <div className="text-center relative z-10">
-                  <div className="inline-block px-3 py-1 bg-red-500/20 border border-red-500/40 rounded-full text-red-400 text-xs font-mono font-bold uppercase mb-2">
-                    Defeated
-                  </div>
-                  <h2 className="text-4xl font-black text-white mb-2 tracking-tight">YOU CRASHED</h2>
-                  <div className="flex items-center justify-center gap-4 text-sm font-mono mt-3">
-                    <div className="bg-black/50 px-4 py-2 rounded-xl border border-white/10 text-white/80">
-                      Final Length: <strong className="text-white font-bold">{Math.floor(player?.score || 10)}</strong>
-                    </div>
-                    <div className="bg-black/50 px-4 py-2 rounded-xl border border-yellow-400/30 text-yellow-300 font-bold flex items-center gap-1.5">
-                      <Zap size={14} className="fill-yellow-400" />
-                      <span>{player?.orbsCollected || 0} Orbs</span>
-                    </div>
-                  </div>
+              <div className="text-center relative z-10">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 border border-white/15 rounded-full text-white/90 text-xs font-mono font-bold uppercase mb-2">
+                  <Sparkles size={13} className="text-pink-400" />
+                  Multiplayer Grid
                 </div>
-              ) : (
-                <div className="text-center relative z-10">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 border border-white/15 rounded-full text-white/90 text-xs font-mono font-bold uppercase mb-2">
-                    <Sparkles size={13} className="text-pink-400" />
-                    Multiplayer Grid
-                  </div>
-                  <h2 className="text-3xl font-black text-white mb-1.5 tracking-tight">JOIN ARENA</h2>
-                  <p className="text-white/60 text-xs max-w-xs mx-auto mb-2">
-                    Collect glowing orbs to grow and dominate the top 5 leaderboard. Steer with A/D or Arrow keys.
-                  </p>
-                  <div className="flex items-center justify-center gap-2 text-[11px] font-mono text-cyan-300 bg-cyan-950/40 border border-cyan-500/30 px-3 py-1.5 rounded-xl">
-                    <ShieldAlert size={14} className="text-cyan-400 shrink-0" />
-                    <span>Beware static neon wall obstacles & barriers!</span>
-                  </div>
+                <h2 className="text-3xl font-black text-white mb-1.5 tracking-tight">JOIN ARENA</h2>
+                <p className="text-white/60 text-xs max-w-xs mx-auto mb-2">
+                  Collect orbs to grow, hunt random Power-Ups (Invincibility & Ghost Mode), and communicate with player emotes.
+                </p>
+                <div className="flex items-center justify-center gap-2 text-[11px] font-mono text-cyan-300 bg-cyan-950/40 border border-cyan-500/30 px-3 py-1.5 rounded-xl">
+                  <ShieldAlert size={14} className="text-cyan-400 shrink-0" />
+                  <span>Beware static obstacles & walls!</span>
                 </div>
-              )}
+              </div>
 
               {/* Snake Preview & Customization Selector Card */}
               <div className="w-full bg-black/50 border border-white/10 rounded-2xl p-4 flex flex-col gap-3 relative z-10">
@@ -465,12 +542,15 @@ export function UI() {
                 className="w-full py-4 bg-white text-black font-black text-base rounded-2xl hover:bg-gray-100 transition-all active:scale-95 shadow-xl relative z-10 flex items-center justify-center gap-2"
               >
                 <Sparkles size={18} />
-                <span>{isDead ? 'RESPAWN IN ARENA' : 'ENTER ARENA'}</span>
+                <span>ENTER ARENA</span>
               </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Brief Game Over UI Notification Overlay with Collision & Orb Stats */}
+      <GameOverSummaryOverlay />
 
       {/* Custom Color Picker Overlay Modal */}
       <ColorPickerOverlay
@@ -481,8 +561,12 @@ export function UI() {
         playerName={customization.name}
         onSave={handleSaveCustomization}
       />
+
+      {/* Settings Overlay for Volume & Camera Zoom */}
+      <SettingsOverlay />
     </div>
   );
 }
+
 
 

@@ -7,14 +7,76 @@ import { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { WORLD_SIZE } from '../shared/types';
+import { useGameStore } from '../store/gameStore';
+
+export const THEME_PALETTES = [
+  {
+    name: 'Cyber Cobalt',
+    highlight: '#00f5d4',
+    line: '#1e40af',
+    cell: '#07152b',
+    light: '#7dd3fc',
+  },
+  {
+    name: 'Synthwave Magenta',
+    highlight: '#ff7eb3',
+    line: '#7928ca',
+    cell: '#1f0a2d',
+    light: '#f472b6',
+  },
+  {
+    name: 'Solar Amber',
+    highlight: '#ffb86c',
+    line: '#d97706',
+    cell: '#2c1808',
+    light: '#fde047',
+  },
+  {
+    name: 'Toxic Emerald',
+    highlight: '#50fa7b',
+    line: '#059669',
+    cell: '#062817',
+    light: '#86efac',
+  },
+  {
+    name: 'Hyper Blue',
+    highlight: '#8be9fd',
+    line: '#3b82f6',
+    cell: '#091c3e',
+    light: '#93c5fd',
+  },
+];
+
+export function getWorldColors(totalOrbs: number) {
+  const normalized = (totalOrbs / 50); // shifts every 50 total orbs
+  const phaseIndex = Math.floor(normalized) % THEME_PALETTES.length;
+  const nextIndex = (phaseIndex + 1) % THEME_PALETTES.length;
+  const progress = normalized - Math.floor(normalized);
+
+  const curr = THEME_PALETTES[phaseIndex];
+  const next = THEME_PALETTES[nextIndex];
+
+  return {
+    curr,
+    next,
+    progress,
+    currentName: curr.name,
+    phaseNumber: (Math.floor(normalized) % THEME_PALETTES.length) + 1,
+  };
+}
 
 export function AnimatedGrid() {
   const materialRef = useRef<THREE.ShaderMaterial>(null);
+  const totalOrbsCollected = useGameStore((state) => state.gameState?.totalOrbsCollected || 0);
+
+  const targetHighlight = useMemo(() => new THREE.Color(), []);
+  const targetLine = useMemo(() => new THREE.Color(), []);
+  const targetCell = useMemo(() => new THREE.Color(), []);
 
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
-      uColorCell: { value: new THREE.Color('#0d1b3e') },
+      uColorCell: { value: new THREE.Color('#07152b') },
       uColorLine: { value: new THREE.Color('#1e40af') },
       uColorHighlight: { value: new THREE.Color('#00f5d4') },
       uWorldSize: { value: WORLD_SIZE },
@@ -63,14 +125,14 @@ export function AnimatedGrid() {
       // Subtle directional drifting energy wave
       float driftWave = sin((pos.x + pos.y) * 0.05 + uTime * 0.8) * 0.5 + 0.5;
 
-      // Base cyber floor color
-      vec3 finalColor = vec3(0.02, 0.03, 0.05);
+      // Base cyber floor color dynamically derived from active world palette
+      vec3 finalColor = uColorCell;
 
-      // Blend secondary grid lines (subtle dark cyan/blue)
+      // Blend secondary grid lines
       finalColor = mix(finalColor, uColorLine, line1 * 0.45);
 
       // Blend major section grid lines with pulse
-      vec3 activeLine10Color = mix(uColorHighlight, vec3(0.3, 0.6, 1.0), driftWave);
+      vec3 activeLine10Color = mix(uColorHighlight, uColorLine * 1.5, driftWave);
       float majorBrightness = 0.5 + pulseWave * 0.6;
       finalColor = mix(finalColor, activeLine10Color * majorBrightness, line10 * 0.85);
 
@@ -90,6 +152,17 @@ export function AnimatedGrid() {
   useFrame((_, delta) => {
     if (materialRef.current) {
       materialRef.current.uniforms.uTime.value += delta;
+
+      // Calculate dynamic color blend based on total collective orbs
+      const { curr, next, progress } = getWorldColors(totalOrbsCollected);
+      targetHighlight.set(curr.highlight).lerp(new THREE.Color(next.highlight), progress);
+      targetLine.set(curr.line).lerp(new THREE.Color(next.line), progress);
+      targetCell.set(curr.cell).lerp(new THREE.Color(next.cell), progress);
+
+      // Smooth transition to target color
+      materialRef.current.uniforms.uColorHighlight.value.lerp(targetHighlight, delta * 2.5);
+      materialRef.current.uniforms.uColorLine.value.lerp(targetLine, delta * 2.5);
+      materialRef.current.uniforms.uColorCell.value.lerp(targetCell, delta * 2.5);
     }
   });
 
