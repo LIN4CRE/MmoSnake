@@ -6,11 +6,21 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGameStore, globalGameState } from '../store/gameStore';
-import { WORLD_SIZE, TURN_SPEED, BOOST_SPEED, BASE_SPEED } from '../shared/types';
+import {
+  WORLD_SIZE,
+  TURN_SPEED,
+  BOOST_SPEED,
+  BASE_SPEED,
+  BOOST_DURATION,
+  BOOST_COOLDOWN,
+  STATIC_OBSTACLES,
+} from '../shared/types';
 import * as THREE from 'three';
-import { Sphere, Grid } from '@react-three/drei';
+import { Sphere } from '@react-three/drei';
 import { ParticleSystem, emitOrbParticles } from './ParticleSystem';
 import { soundManager } from '../utils/audio';
+import { AnimatedGrid } from './AnimatedGrid';
+import { Obstacles } from './Obstacles';
 
 const localCollectedOrbs = new Set<string>();
 
@@ -215,17 +225,57 @@ export function GameScene() {
     lastSendTime: 0,
   });
 
+  const boostRef = useRef<{
+    isActive: boolean;
+    timeLeft: number;
+    cooldownLeft: number;
+    lastUiSync: number;
+  }>({
+    isActive: false,
+    timeLeft: 0,
+    cooldownLeft: 0,
+    lastUiSync: 0,
+  });
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') && !inputs.current.left) { inputs.current.left = true; }
-      if ((e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') && !inputs.current.right) { inputs.current.right = true; }
-      if ((e.key === ' ' || e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') && !inputs.current.boost) { inputs.current.boost = true; }
+      if ((e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') && !inputs.current.left) {
+        inputs.current.left = true;
+      }
+      if ((e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') && !inputs.current.right) {
+        inputs.current.right = true;
+      }
+      if (
+        (e.key === ' ' || e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp' || e.key === 'Shift') &&
+        !inputs.current.boost
+      ) {
+        inputs.current.boost = true;
+        // Trigger temporary speed boost if available
+        if (
+          !boostRef.current.isActive &&
+          boostRef.current.cooldownLeft <= 0 &&
+          localPlayerRef.current.active
+        ) {
+          boostRef.current.isActive = true;
+          boostRef.current.timeLeft = BOOST_DURATION;
+          soundManager.playBoostActivate();
+        }
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if ((e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') && inputs.current.left) { inputs.current.left = false; }
-      if ((e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') && inputs.current.right) { inputs.current.right = false; }
-      if ((e.key === ' ' || e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') && inputs.current.boost) { inputs.current.boost = false; }
+      if ((e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') && inputs.current.left) {
+        inputs.current.left = false;
+      }
+      if ((e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') && inputs.current.right) {
+        inputs.current.right = false;
+      }
+      if (
+        (e.key === ' ' || e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp' || e.key === 'Shift') &&
+        inputs.current.boost
+      ) {
+        inputs.current.boost = false;
+      }
     };
 
     const handleBlur = () => {
@@ -256,15 +306,51 @@ export function GameScene() {
         localPlayerRef.current.segments = [...serverPlayer.segments];
         localPlayerRef.current.score = serverPlayer.score;
         localPlayerRef.current.currentAngle = serverPlayer.currentAngle;
+        boostRef.current.isActive = false;
+        boostRef.current.timeLeft = 0;
+        boostRef.current.cooldownLeft = 0;
       }
 
       if (!localPlayerRef.current.active) return;
 
-      // Local movement logic
+      // Local steering
       if (inputs.current.left) localPlayerRef.current.currentAngle += TURN_SPEED * delta;
       if (inputs.current.right) localPlayerRef.current.currentAngle -= TURN_SPEED * delta;
       
-      localPlayerRef.current.isBoosting = inputs.current.boost && localPlayerRef.current.score > 10;
+      // Speed boost timer and cooldown mechanic
+      if (boostRef.current.isActive) {
+        boostRef.current.timeLeft -= delta;
+        localPlayerRef.current.isBoosting = true;
+        if (boostRef.current.timeLeft <= 0) {
+          boostRef.current.isActive = false;
+          boostRef.current.timeLeft = 0;
+          boostRef.current.cooldownLeft = BOOST_COOLDOWN;
+          localPlayerRef.current.isBoosting = false;
+        }
+      } else {
+        localPlayerRef.current.isBoosting = false;
+        if (boostRef.current.cooldownLeft > 0) {
+          const prevCooldown = boostRef.current.cooldownLeft;
+          boostRef.current.cooldownLeft -= delta;
+          if (prevCooldown > 0 && boostRef.current.cooldownLeft <= 0) {
+            boostRef.current.cooldownLeft = 0;
+            soundManager.playBoostReady();
+          }
+        }
+      }
+
+      // Sync boost state to store periodically for UI HUD
+      const nowTime = performance.now();
+      if (nowTime - boostRef.current.lastUiSync > 80) {
+        boostRef.current.lastUiSync = nowTime;
+        useGameStore.getState().setBoostState({
+          isAvailable: !boostRef.current.isActive && boostRef.current.cooldownLeft <= 0,
+          isActive: boostRef.current.isActive,
+          timeLeft: Math.max(0, boostRef.current.timeLeft),
+          cooldownLeft: Math.max(0, boostRef.current.cooldownLeft),
+        });
+      }
+
       const speed = localPlayerRef.current.isBoosting ? BOOST_SPEED : BASE_SPEED;
       
       const head = { ...localPlayerRef.current.segments[0] };
@@ -280,12 +366,13 @@ export function GameScene() {
 
       localPlayerRef.current.segments.unshift(head);
 
-      if (localPlayerRef.current.isBoosting) {
-        localPlayerRef.current.score -= 2 * delta;
-        if (localPlayerRef.current.score <= 10) {
-          localPlayerRef.current.isBoosting = false;
-          localPlayerRef.current.score = 10;
-        }
+      // Trail boost particles
+      if (localPlayerRef.current.isBoosting && Math.random() < 0.35) {
+        emitOrbParticles(
+          head.x - Math.cos(localPlayerRef.current.currentAngle) * 1.2,
+          head.y - Math.sin(localPlayerRef.current.currentAngle) * 1.2,
+          serverPlayer.headColor || '#00f5d4'
+        );
       }
 
       const targetLength = Math.floor(localPlayerRef.current.score);
@@ -317,21 +404,37 @@ export function GameScene() {
         }
       }
 
-      // Check player collisions
+      // Check obstacle collisions
       let collided = false;
-      for (const otherId in gs.players) {
-        if (otherId === playerId) continue;
-        const other = gs.players[otherId];
-        if (other.state !== 'alive') continue;
-        for (const seg of other.segments) {
-          const dx = head.x - seg.x;
-          const dy = head.y - seg.y;
-          if (dx * dx + dy * dy < 2.25) {
-            collided = true;
-            break;
-          }
+      let collisionCause: { killerId?: string; obstacleId?: string } | undefined = undefined;
+
+      for (const obs of STATIC_OBSTACLES) {
+        const halfW = obs.width / 2 + 0.6;
+        const halfH = obs.height / 2 + 0.6;
+        if (Math.abs(head.x - obs.x) < halfW && Math.abs(head.y - obs.y) < halfH) {
+          collided = true;
+          collisionCause = { obstacleId: obs.id };
+          break;
         }
-        if (collided) break;
+      }
+
+      // Check player collisions
+      if (!collided) {
+        for (const otherId in gs.players) {
+          if (otherId === playerId) continue;
+          const other = gs.players[otherId];
+          if (other.state !== 'alive') continue;
+          for (const seg of other.segments) {
+            const dx = head.x - seg.x;
+            const dy = head.y - seg.y;
+            if (dx * dx + dy * dy < 2.25) {
+              collided = true;
+              collisionCause = { killerId: otherId };
+              break;
+            }
+          }
+          if (collided) break;
+        }
       }
 
       if (collided) {
@@ -350,12 +453,15 @@ export function GameScene() {
         });
 
         localPlayerRef.current.active = false;
+        boostRef.current.isActive = false;
+        boostRef.current.timeLeft = 0;
         sendPlayerState({
           segments: localPlayerRef.current.segments,
           score: localPlayerRef.current.score,
           currentAngle: localPlayerRef.current.currentAngle,
-          isBoosting: localPlayerRef.current.isBoosting,
-          state: 'dead'
+          isBoosting: false,
+          state: 'dead',
+          cause: collisionCause
         });
         return;
       }
@@ -419,25 +525,11 @@ export function GameScene() {
       />
       <primitive object={lightTarget} />
 
-      {/* Ground plane to receive shadows */}
-      <mesh receiveShadow position={[0, 0, -0.2]}>
-        <planeGeometry args={[WORLD_SIZE, WORLD_SIZE]} />
-        <meshStandardMaterial color="#0a0a0a" />
-      </mesh>
+      {/* Animated Pulsing Futuristic Neon Background Grid */}
+      <AnimatedGrid />
 
-      <Grid
-        position={[0, 0, -0.1]}
-        rotation={[Math.PI / 2, 0, 0]}
-        args={[WORLD_SIZE, WORLD_SIZE]}
-        cellSize={1}
-        cellThickness={0.5}
-        cellColor="#1e3a8a"
-        sectionSize={10}
-        sectionThickness={1}
-        sectionColor="#3b82f6"
-        fadeDistance={100}
-        fadeStrength={1}
-      />
+      {/* Static Wall Obstacles */}
+      <Obstacles />
 
       <Orbs />
 

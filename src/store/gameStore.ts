@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
-import { GameState } from '../shared/types';
+import { GameState, GameNotification } from '../shared/types';
 import { emitOrbParticles } from '../components/ParticleSystem';
 import { soundManager } from '../utils/audio';
 
@@ -15,6 +15,13 @@ export interface SnakeCustomization {
   tailColor: string;
 }
 
+export interface BoostState {
+  isAvailable: boolean;
+  isActive: boolean;
+  timeLeft: number;
+  cooldownLeft: number;
+}
+
 interface GameStore {
   socket: Socket | null;
   gameState: GameState | null;
@@ -22,11 +29,16 @@ interface GameStore {
   customization: SnakeCustomization;
   isMuted: boolean;
   isColorPickerOpen: boolean;
+  notifications: GameNotification[];
+  boostState: BoostState;
   connect: () => void;
   joinGame: () => void;
   setCustomization: (custom: Partial<SnakeCustomization>) => void;
   setColorPickerOpen: (open: boolean) => void;
   toggleMute: () => void;
+  addNotification: (notification: GameNotification) => void;
+  removeNotification: (id: string) => void;
+  setBoostState: (state: BoostState) => void;
   sendPlayerState: (data: any) => void;
   sendCollectOrb: (orbId: string) => void;
 }
@@ -65,12 +77,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
   customization: getSavedCustomization(),
   isMuted: soundManager.getIsMuted(),
   isColorPickerOpen: false,
+  notifications: [],
+  boostState: {
+    isAvailable: true,
+    isActive: false,
+    timeLeft: 0,
+    cooldownLeft: 0,
+  },
 
   setColorPickerOpen: (isColorPickerOpen) => set({ isColorPickerOpen }),
 
   toggleMute: () => {
     const isMuted = soundManager.toggleMute();
     set({ isMuted });
+  },
+
+  setBoostState: (boostState) => set({ boostState }),
+
+  addNotification: (notification) => {
+    const current = get().notifications;
+    const next = [notification, ...current.filter((n) => n.id !== notification.id).slice(0, 3)];
+    set({ notifications: next });
+    setTimeout(() => {
+      get().removeNotification(notification.id);
+    }, 4200);
+  },
+
+  removeNotification: (id) => {
+    set({ notifications: get().notifications.filter((n) => n.id !== id) });
   },
 
   setCustomization: (partial) => {
@@ -106,6 +140,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       if (data.collectorId === get().playerId) {
         soundManager.playOrbCollect();
       }
+    });
+
+    socket.on('game_notification', (data: GameNotification) => {
+      get().addNotification(data);
+      soundManager.playNotification(data.type);
     });
 
     socket.on('state', (state: GameState) => {

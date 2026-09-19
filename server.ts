@@ -193,7 +193,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('update_state', (data: { segments: any[]; score: number; currentAngle: number; isBoosting: boolean; state: string }) => {
+  socket.on('update_state', (data: {
+    segments: any[];
+    score: number;
+    currentAngle: number;
+    isBoosting: boolean;
+    state: string;
+    cause?: { killerId?: string; obstacleId?: string };
+  }) => {
     const player = state.players[socket.id];
     if (player && player.state === 'alive') {
       player.segments = data.segments;
@@ -219,6 +226,28 @@ io.on('connection', (socket) => {
             spawnOrb(seg.x, seg.y, 1, i % 4 === 0 ? player.headColor : player.tailColor, true);
           }
         });
+
+        // Emit death / kill notification
+        if (data.cause?.killerId && state.players[data.cause.killerId]) {
+          const killer = state.players[data.cause.killerId];
+          io.emit('game_notification', {
+            id: uuidv4(),
+            type: 'kill',
+            title: 'ELIMINATION',
+            message: `${killer.name} eliminated ${player.name}!`,
+            color: killer.headColor || '#ff7eb3',
+            timestamp: Date.now(),
+          });
+        } else if (data.cause?.obstacleId) {
+          io.emit('game_notification', {
+            id: uuidv4(),
+            type: 'crash',
+            title: 'BARRIER CRASH',
+            message: `${player.name} collided with a neon wall obstacle!`,
+            color: '#ff5555',
+            timestamp: Date.now(),
+          });
+        }
       }
     }
   });
@@ -229,7 +258,8 @@ io.on('connection', (socket) => {
       delete state.orbs[orbId];
       const player = state.players[socket.id];
       if (player && player.state === 'alive') {
-        player.orbsCollected = (player.orbsCollected || 0) + (orb.value || 1);
+        const prevOrbs = player.orbsCollected || 0;
+        player.orbsCollected = prevOrbs + (orb.value || 1);
         upsertScore.run({
           id: player.id,
           name: player.name,
@@ -238,6 +268,22 @@ io.on('connection', (socket) => {
           head_color: player.headColor,
           tail_color: player.tailColor,
         });
+
+        // Check milestones
+        const milestones = [10, 25, 50, 100, 150, 200];
+        for (const m of milestones) {
+          if (prevOrbs < m && player.orbsCollected >= m) {
+            io.emit('game_notification', {
+              id: uuidv4(),
+              type: 'milestone',
+              title: 'ORB MILESTONE',
+              message: `${player.name} collected ${m} orbs!`,
+              color: '#00f5d4',
+              timestamp: Date.now(),
+            });
+            break;
+          }
+        }
       }
       // Broadcast orb collection event for sound and particle feedback across clients
       io.emit('orb_collected', {

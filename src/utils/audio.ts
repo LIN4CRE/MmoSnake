@@ -168,6 +168,103 @@ class SoundSystem {
     osc1.stop(t + 1.0);
     whiteNoise.stop(t + 0.35);
   }
+
+  // Play futuristic speed boost ignition whoosh
+  public playBoostActivate() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+
+    // Upward pitch bend laser warp
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, t);
+    osc.frequency.exponentialRampToValueAtTime(720, t + 0.35);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(400, t);
+    filter.frequency.exponentialRampToValueAtTime(3200, t + 0.35);
+
+    gain.gain.setValueAtTime(0.01, t);
+    gain.gain.linearRampToValueAtTime(0.2, t + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.5);
+  }
+
+  // Play boost ready double-blip
+  public playBoostReady() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+
+    [0, 0.08].forEach((delay, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(idx === 0 ? 880 : 1320, t + delay);
+
+      gain.gain.setValueAtTime(0.001, t + delay);
+      gain.gain.linearRampToValueAtTime(0.12, t + delay + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.12);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t + delay);
+      osc.stop(t + delay + 0.14);
+    });
+  }
+
+  // Play heroic milestone, kill, crash, or system notification chime
+  public playNotification(type: 'kill' | 'milestone' | 'crash' | 'system' = 'milestone') {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+
+    const freqs = type === 'kill' 
+      ? [440, 554.37, 659.25, 880] // Major fanfare
+      : type === 'milestone'
+      ? [523.25, 659.25, 783.99, 1046.5] // Bright sparkling chord
+      : type === 'crash'
+      ? [330, 293.66, 246.94] // Minor fall
+      : [587.33, 880]; // Gentle dual bell
+
+    freqs.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const delay = idx * 0.07;
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t + delay);
+
+      gain.gain.setValueAtTime(0.001, t + delay);
+      gain.gain.linearRampToValueAtTime(0.14, t + delay + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.4);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(t + delay);
+      osc.stop(t + delay + 0.45);
+    });
+  }
 }
 
 export const soundManager = new SoundSystem();

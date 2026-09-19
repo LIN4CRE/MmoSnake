@@ -14,8 +14,14 @@ import {
   Zap,
   Sparkles,
   Flame,
+  Swords,
+  AlertTriangle,
+  Bell,
+  Gauge,
+  ShieldAlert,
 } from 'lucide-react';
 import { ColorPickerOverlay } from './ColorPickerOverlay';
+import { BOOST_DURATION, BOOST_COOLDOWN } from '../shared/types';
 
 export function UI() {
   const {
@@ -28,6 +34,8 @@ export function UI() {
     toggleMute,
     isColorPickerOpen,
     setColorPickerOpen,
+    notifications,
+    boostState,
   } = useGameStore();
 
   const player = playerId && gameState ? gameState.players[playerId] : null;
@@ -45,8 +53,17 @@ export function UI() {
   const top5 = gameState?.leaderboard?.slice(0, 5) || [];
   const isUserInTop5 = top5.some((e) => e.id === playerId);
 
+  // Calculate boost gauge percentages
+  const activePercent = boostState.isActive
+    ? Math.max(0, Math.min(100, (boostState.timeLeft / BOOST_DURATION) * 100))
+    : 0;
+
+  const cooldownPercent = boostState.cooldownLeft > 0
+    ? Math.max(0, Math.min(100, ((BOOST_COOLDOWN - boostState.cooldownLeft) / BOOST_COOLDOWN) * 100))
+    : 100;
+
   return (
-    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-20">
+    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-20 overflow-hidden">
       {/* Top Bar */}
       <div className="flex justify-between items-start pointer-events-auto relative">
         <div className="flex flex-col gap-1.5 z-10">
@@ -87,7 +104,7 @@ export function UI() {
           </div>
           <div className="flex items-center gap-2 text-xs font-mono text-white bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-md border border-white/10">
             <span className="font-bold bg-white/20 px-1.5 py-0.5 rounded text-white">SPACE</span>
-            <span className="text-white/70 uppercase tracking-wider text-[10px]">Boost</span>
+            <span className="text-white/70 uppercase tracking-wider text-[10px]">Speed Boost</span>
           </div>
         </div>
 
@@ -131,6 +148,46 @@ export function UI() {
             <span className="hidden sm:inline">New Tab</span>
           </button>
         </div>
+      </div>
+
+      {/* In-Game Notification System Feed */}
+      <div className="absolute top-14 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-none z-30 max-w-md w-full px-4">
+        <AnimatePresence>
+          {notifications.map((notif) => (
+            <motion.div
+              key={notif.id}
+              initial={{ opacity: 0, y: -20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -15, scale: 0.9 }}
+              transition={{ duration: 0.25 }}
+              className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl backdrop-blur-xl border shadow-2xl text-xs font-mono font-medium max-w-full ${
+                notif.type === 'kill'
+                  ? 'bg-red-950/80 border-red-500/40 text-red-200'
+                  : notif.type === 'milestone'
+                  ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-200'
+                  : notif.type === 'crash'
+                  ? 'bg-orange-950/80 border-orange-500/40 text-orange-200'
+                  : 'bg-zinc-900/85 border-white/20 text-white'
+              }`}
+            >
+              <div className="p-1.5 rounded-xl bg-black/40 border border-white/10 shrink-0">
+                {notif.type === 'kill' && <Swords size={16} className="text-red-400" />}
+                {notif.type === 'milestone' && <Trophy size={16} className="text-yellow-400" />}
+                {notif.type === 'crash' && <AlertTriangle size={16} className="text-orange-400" />}
+                {notif.type === 'system' && <Bell size={16} className="text-cyan-400" />}
+              </div>
+
+              <div className="flex flex-col truncate">
+                <span className="text-[10px] font-black uppercase tracking-wider opacity-70">
+                  {notif.title}
+                </span>
+                <span className="text-xs font-bold text-white tracking-tight truncate">
+                  {notif.message}
+                </span>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
       {/* Persistent In-Game Leaderboard Overlay (Top 5 Orb Count) */}
@@ -233,6 +290,74 @@ export function UI() {
         </div>
       )}
 
+      {/* Temporary Speed Boost Cooldown & Gauge HUD Widget (Active when alive) */}
+      {isAlive && (
+        <div className="pointer-events-auto self-center mb-4 z-20">
+          <div
+            className={`flex flex-col gap-1.5 px-4 py-2.5 rounded-2xl backdrop-blur-xl border transition-all duration-300 shadow-2xl min-w-[240px] ${
+              boostState.isActive
+                ? 'bg-cyan-950/80 border-cyan-400 shadow-[0_0_25px_rgba(0,245,212,0.4)] scale-105'
+                : boostState.cooldownLeft > 0
+                ? 'bg-zinc-950/80 border-white/10 opacity-90'
+                : 'bg-black/60 border-cyan-500/40 hover:border-cyan-400 shadow-[0_0_15px_rgba(0,245,212,0.2)]'
+            }`}
+          >
+            <div className="flex items-center justify-between text-xs font-mono font-bold">
+              <div className="flex items-center gap-1.5">
+                <Gauge
+                  size={15}
+                  className={
+                    boostState.isActive
+                      ? 'text-cyan-300 animate-spin'
+                      : boostState.cooldownLeft > 0
+                      ? 'text-white/40'
+                      : 'text-cyan-400'
+                  }
+                />
+                <span className="uppercase tracking-wider">
+                  {boostState.isActive
+                    ? 'SPEED BOOST ACTIVE'
+                    : boostState.cooldownLeft > 0
+                    ? 'BOOST RECHARGING'
+                    : 'SPEED BOOST READY'}
+                </span>
+              </div>
+
+              <span className="text-[11px]">
+                {boostState.isActive ? (
+                  <strong className="text-cyan-300">{boostState.timeLeft.toFixed(1)}s</strong>
+                ) : boostState.cooldownLeft > 0 ? (
+                  <span className="text-white/50">{boostState.cooldownLeft.toFixed(1)}s</span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded-md bg-cyan-400/20 text-cyan-300 text-[10px] border border-cyan-400/30">
+                    SPACE
+                  </span>
+                )}
+              </span>
+            </div>
+
+            {/* Gauge Progress Bar */}
+            <div className="w-full h-2 bg-black/60 rounded-full overflow-hidden border border-white/10 relative">
+              {boostState.isActive ? (
+                <div
+                  className="h-full bg-gradient-to-r from-cyan-400 via-teal-300 to-white transition-all duration-75 rounded-full shadow-[0_0_8px_#00f5d4]"
+                  style={{ width: `${activePercent}%` }}
+                />
+              ) : (
+                <div
+                  className={`h-full transition-all duration-100 rounded-full ${
+                    boostState.cooldownLeft > 0
+                      ? 'bg-white/30'
+                      : 'bg-cyan-400 shadow-[0_0_6px_#00f5d4]'
+                  }`}
+                  style={{ width: `${cooldownPercent}%` }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Menus (Join / Respawn) */}
       <AnimatePresence>
         {(!player || isDead) && (
@@ -276,9 +401,13 @@ export function UI() {
                     Multiplayer Grid
                   </div>
                   <h2 className="text-3xl font-black text-white mb-1.5 tracking-tight">JOIN ARENA</h2>
-                  <p className="text-white/60 text-xs max-w-xs mx-auto">
+                  <p className="text-white/60 text-xs max-w-xs mx-auto mb-2">
                     Collect glowing orbs to grow and dominate the top 5 leaderboard. Steer with A/D or Arrow keys.
                   </p>
+                  <div className="flex items-center justify-center gap-2 text-[11px] font-mono text-cyan-300 bg-cyan-950/40 border border-cyan-500/30 px-3 py-1.5 rounded-xl">
+                    <ShieldAlert size={14} className="text-cyan-400 shrink-0" />
+                    <span>Beware static neon wall obstacles & barriers!</span>
+                  </div>
                 </div>
               )}
 
@@ -355,4 +484,5 @@ export function UI() {
     </div>
   );
 }
+
 
