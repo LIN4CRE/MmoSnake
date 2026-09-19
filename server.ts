@@ -166,6 +166,43 @@ for (let i = 0; i < 150; i++) {
 spawnPowerUp('invincibility', -25, 25);
 spawnPowerUp('ghost', 25, -25);
 
+// AI Bot Snakes for active arena competition & combat kills
+const AI_BOTS = [
+  { id: 'bot-1', name: 'CyberViper', head: '#ff7eb3', tail: '#bd93f9', respawnTimer: 0, angle: 0 },
+  { id: 'bot-2', name: 'NeonSerpent', head: '#50fa7b', tail: '#8be9fd', respawnTimer: 0, angle: Math.PI },
+  { id: 'bot-3', name: 'QuantumWorm', head: '#8be9fd', tail: '#ff7eb3', respawnTimer: 0, angle: Math.PI / 2 },
+];
+
+function spawnBot(bot: (typeof AI_BOTS)[0]) {
+  const startX = (Math.random() - 0.5) * (WORLD_SIZE - 50);
+  const startY = (Math.random() - 0.5) * (WORLD_SIZE - 50);
+  const angle = Math.random() * Math.PI * 2;
+  const segments = [];
+  const length = 12 + Math.floor(Math.random() * 8);
+  for (let i = 0; i < length; i++) {
+    segments.push({
+      x: startX - Math.cos(angle) * i * SEGMENT_SPACING,
+      y: startY - Math.sin(angle) * i * SEGMENT_SPACING,
+    });
+  }
+  state.players[bot.id] = {
+    id: bot.id,
+    name: bot.name,
+    color: bot.head,
+    headColor: bot.head,
+    tailColor: bot.tail,
+    segments,
+    score: length,
+    orbsCollected: Math.floor(Math.random() * 20),
+    isBoosting: false,
+    state: 'alive',
+    currentAngle: angle,
+    inputs: { left: false, right: false, boost: false },
+  };
+}
+
+AI_BOTS.forEach(spawnBot);
+
 let snakeCounter = 1;
 
 io.on('connection', (socket) => {
@@ -297,6 +334,11 @@ io.on('connection', (socket) => {
             message: `${killer.name} eliminated ${player.name}!`,
             color: killerColor,
             timestamp: Date.now(),
+          });
+          // Credit the kill to killer socket
+          io.to(data.cause.killerId).emit('kill_credited', {
+            victimName: player.name,
+            victimScore: Math.floor(player.score),
           });
         } else if (data.cause?.obstacleId) {
           obstacleName = 'Neon Barrier Wall';

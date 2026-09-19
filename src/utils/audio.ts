@@ -506,6 +506,35 @@ class SoundSystem {
     osc.start(t);
     osc.stop(t + 0.22);
   }
+
+  // Play satisfying elimination / kill victory chord
+  public playKill() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const dest = this.sfxGainNode || ctx.destination;
+
+    // Rising double major chord burst (C5 -> E5 -> G5 -> C6)
+    const freqs = [523.25, 659.25, 783.99, 1046.5];
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t + i * 0.05);
+
+      gain.gain.setValueAtTime(0.001, t + i * 0.05);
+      gain.gain.linearRampToValueAtTime(0.22, t + i * 0.05 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.05 + 0.35);
+
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(t + i * 0.05);
+      osc.stop(t + i * 0.05 + 0.4);
+    });
+  }
 }
 
 export const soundManager = new SoundSystem();
